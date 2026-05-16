@@ -3,8 +3,8 @@ import { FREE_TRANSLATION_LIMIT } from '../shared/license.js';
 const LICENSE_CHANGE_EVENT = 'glotshot-license-change';
 
 let cachedStatus = {
-  isPro: false,
-  source: 'unsupported'
+  isPro: true,
+  source: 'dev-stub'
 };
 
 function emitLicenseChange(state) {

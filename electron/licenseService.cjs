@@ -272,12 +272,7 @@ class LicenseService {
   }
 
   getCurrentPurchasedState() {
-    if (this.provider !== 'mas') {
-      this.clearStoredPurchase();
-      return false;
-    }
-
-    return this.readPurchasedState();
+    return true;
   }
 
   readPurchasedState() {
