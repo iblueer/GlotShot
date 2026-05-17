@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, LayoutGrid, Monitor, Palette, Keyboard, Settings, Info, Image as ImageIcon, Layers, Github, ExternalLink, Star, Sun, Moon, Coffee, Crown, Check } from 'lucide-react';
+import { X, LayoutGrid, Monitor, Palette, Keyboard, Settings, Info, Image as ImageIcon, Layers, Github, ExternalLink, Star, Sun, Moon, Coffee, Crown, Check, Bot } from 'lucide-react';
 import './SettingsModal.css';
 import { useTranslation, SUPPORTED_UI_LANGUAGES, detectSystemLanguage } from '../locales/i18n';
 import { LicenseManager } from '../services/LicenseManager';
+import AISettingsTab from './AISettingsTab';
 
 const appLogo = '/icon/DMG_Icon_1024x1024.png';
 const LICENSE_BENEFIT_ITEMS = [
@@ -61,6 +62,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'start', appMode, setAppM
         { id: 'start', icon: LayoutGrid, label: t('settings.nav.start') },
         { id: 'shortcuts', icon: Keyboard, label: t('settings.nav.shortcuts') },
         { id: 'general', icon: Settings, label: t('settings.nav.general') },
+        { id: 'ai', icon: Bot, label: 'AI 管理' },
         { id: 'about', icon: Info, label: t('settings.nav.about') },
         { id: 'license', icon: Crown, label: t('settings.nav.license') },
     ];
@@ -325,29 +327,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'start', appMode, setAppM
                                 </div>
                             </div>
 
-                            {/* Ollama */}
-                            <div className="form-group">
-                                <label className="form-label">{t('settings.general.ollama_title')}</label>
-                                <input
-                                    type="text"
-                                    className="form-input mb-2"
-                                    placeholder="http://localhost:11434"
-                                    value={globalSettings.ollamaHost || ''}
-                                    onChange={(e) => setGlobalSettings(prev => ({ ...prev, ollamaHost: e.target.value }))}
-                                />
-                                <div className="toggle-group" style={{ background: 'transparent', padding: '8px 0', border: 'none' }}>
-                                    <div className="toggle-label">{t('settings.general.auto_translate')}</div>
-                                    <label className="toggle-switch">
-                                        <input
-                                            type="checkbox"
-                                            checked={globalSettings.autoTranslate}
-                                            onChange={(e) => setGlobalSettings(prev => ({ ...prev, autoTranslate: e.target.checked }))}
-                                        />
-                                        <span className="toggle-slider"></span>
-                                    </label>
-                                </div>
-                            </div>
-
                             {/* Export Path */}
                             <div className="form-group">
                                 <label className="form-label">{t('settings.general.export_path')}</label>
@@ -359,6 +338,14 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'start', appMode, setAppM
                                     onChange={(e) => setGlobalSettings(prev => ({ ...prev, saveLocation: e.target.value }))}
                                 />
                             </div>
+                        </div>
+                    )}
+
+                    {/* AI MANAGEMENT */}
+                    {activeTab === 'ai' && (
+                        <div className="content-section">
+                            <h2 className="section-title">AI 管理</h2>
+                            <AISettingsTab />
                         </div>
                     )}
 

@@ -10,6 +10,7 @@ import PaywallDialog from './components/PaywallDialog';
 import { useTranslation, I18nProvider } from './locales/i18n';
 import ConfirmDialog from './components/ConfirmDialog';
 import { LicenseManager } from './services/LicenseManager';
+import { AIProviderManager } from './services/AIProviderManager';
 import {
   buildProjectWindowTitle,
   createProjectDocument,
@@ -34,7 +35,6 @@ const DEFAULT_WIDTH = 2880;
 const DEFAULT_HEIGHT = 1800;
 const DEFAULT_TRANSLATION_LANGUAGE = 'en';
 const TRANSLATION_TIMEOUT_MS = 10000;
-const OLLAMA_CONNECT_TIMEOUT_MS = 3000;
 const CENTER_SNAP_THRESHOLD = 18;
 const INITIAL_IMPORT_PROGRESS = {
   active: false,
@@ -422,15 +422,11 @@ const readAppPreferences = () => {
 };
 
 const pickAppPreferences = (settings = {}) => ({
-  ollamaHost: settings.ollamaHost ?? 'http://localhost:11434',
-  autoTranslate: settings.autoTranslate ?? true,
   uiLanguage: settings.uiLanguage ?? detectDefaultUiLanguage(),
 });
 
 const pickProjectGlobalSettings = (settings = {}) => {
   const {
-    ollamaHost,
-    autoTranslate,
     uiLanguage,
     ...projectSettings
   } = settings || {};
@@ -467,8 +463,6 @@ const createDefaultProjectGlobalSettings = (appPreferences = {}) => {
     primaryLang,
     secondaryLangs,
     secondaryLang: secondaryLangs[0] || 'none',
-    ollamaHost: appPreferences.ollamaHost ?? 'http://localhost:11434',
-    autoTranslate: appPreferences.autoTranslate ?? true,
     uiLanguage: appPreferences.uiLanguage ?? detectDefaultUiLanguage(),
   };
 };
@@ -926,7 +920,16 @@ const App = () => {
   // Persist app-level preferences only. Project-level state lives in the source file.
   useEffect(() => {
     localStorage.setItem(APP_PREFERENCES_STORAGE_KEY, JSON.stringify(pickAppPreferences(globalSettings)));
-  }, [globalSettings.ollamaHost, globalSettings.autoTranslate, globalSettings.uiLanguage]);
+  }, [globalSettings.primaryLang, globalSettings.secondaryLangs, globalSettings.uiLanguage]);
+
+  // Subscribe to AIProviderManager changes
+  useEffect(() => {
+    const unsub = AIProviderManager.onChange(() => {
+      setAiConfig(AIProviderManager.getActiveConfig());
+      setAiConnected(null); // reset connection state when config changes
+    });
+    return unsub;
+  }, []);
 
   // Custom Size Presets (user-defined, project-level)
   const [customSizePresets, setCustomSizePresets] = useState([]);
@@ -981,15 +984,9 @@ const App = () => {
   }, [closeTopbarOverlays]);
 
 
-  // Ollama Settings
-  const [ollamaConfig, setOllamaConfig] = useState({
-    host: globalSettings.ollamaHost || 'http://localhost:11434',
-    model: '',
-    availableModels: [],
-    isConnected: false,
-    autoTranslate: globalSettings.autoTranslate ?? true
-  });
-  const [showOllamaGuide, setShowOllamaGuide] = useState(false);
+  // AI Provider config (read from AIProviderManager service)
+  const [aiConfig, setAiConfig] = useState(() => AIProviderManager.getActiveConfig());
+  const [aiConnected, setAiConnected] = useState(null); // null=未测试, true, false
   const [isRetranslating, setIsRetranslating] = useState(false);
   const [isBatchRetranslating, setIsBatchRetranslating] = useState(false);
   const selectedSecondaryLangs = normalizeSecondaryLangs(
@@ -1261,37 +1258,7 @@ const App = () => {
     }
   };
 
-  useEffect(() => {
-    const nextHost = globalSettings.ollamaHost || 'http://localhost:11434';
-    const nextAutoTranslate = globalSettings.autoTranslate ?? true;
 
-    setOllamaConfig(prev => {
-      if (prev.host === nextHost && prev.autoTranslate === nextAutoTranslate) {
-        return prev;
-      }
-      return {
-        ...prev,
-        host: nextHost,
-        autoTranslate: nextAutoTranslate
-      };
-    });
-  }, [globalSettings.ollamaHost, globalSettings.autoTranslate]);
-
-  useEffect(() => {
-    const nextHost = ollamaConfig.host || 'http://localhost:11434';
-    const nextAutoTranslate = ollamaConfig.autoTranslate ?? true;
-
-    setGlobalSettings(prev => {
-      if (prev.ollamaHost === nextHost && prev.autoTranslate === nextAutoTranslate) {
-        return prev;
-      }
-      return {
-        ...prev,
-        ollamaHost: nextHost,
-        autoTranslate: nextAutoTranslate
-      };
-    });
-  }, [ollamaConfig.host, ollamaConfig.autoTranslate]);
 
   useEffect(() => {
     const normalizedSecondaryLangs = normalizeSecondaryLangs(
@@ -1391,144 +1358,19 @@ const App = () => {
     });
   }, [createDefaultProjectScene, globalSettings]);
 
-  // --- OLLAMA INTEGRATION ---
+  // --- AI INTEGRATION ---
 
-  const activeOllamaModel = ollamaConfig.model || ollamaConfig.availableModels[0] || '';
-  const canTranslateWithAi = ollamaConfig.isConnected && Boolean(activeOllamaModel) && selectedSecondaryLangs.length > 0;
+  const canTranslateWithAi = Boolean(aiConfig.provider) && Boolean(aiConfig.modelName) && selectedSecondaryLangs.length > 0;
 
-  const checkOllamaConnection = async ({ jobId } = {}) => {
-    const controller = new AbortController();
-    const trackProgressAbort = Boolean(jobId) && isImportProgressJobActive(jobId);
-    let didTimeout = false;
-
-    if (trackProgressAbort) {
-      progressAbortControllerRef.current = controller;
-    }
-
-    const timeoutId = setTimeout(() => {
-      didTimeout = true;
-      controller.abort();
-    }, OLLAMA_CONNECT_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(`${ollamaConfig.host}/api/tags`, { signal: controller.signal });
-      if (!response.ok) {
-        throw new Error(`Failed to connect: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const models = (data.models || []).map(m => m.name).filter(Boolean);
-      const hasModels = models.length > 0;
-
-      setOllamaConfig(prev => ({
-        ...prev,
-        isConnected: true,
-        availableModels: models,
-        model: models.includes(prev.model) ? prev.model : (models[0] || '')
-      }));
-
-      return {
-        ok: hasModels,
-        reason: hasModels ? null : 'no-models',
-        models
-      };
-    } catch (error) {
-      const wasCancelled = error?.name === 'AbortError' && !didTimeout;
-      if (!wasCancelled) {
-        console.error("Ollama connection failed:", error);
-        setOllamaConfig(prev => ({
-          ...prev,
-          isConnected: false,
-          availableModels: [],
-          model: ''
-        }));
-      }
-
-      return {
-        ok: false,
-        reason: error?.name === 'AbortError'
-          ? (didTimeout ? 'timeout' : 'cancelled')
-          : 'offline'
-      };
-    } finally {
-      clearTimeout(timeoutId);
-      if (trackProgressAbort && progressAbortControllerRef.current === controller) {
-        progressAbortControllerRef.current = null;
-      }
-    }
-  };
-
-  useEffect(() => {
-    checkOllamaConnection();
-  }, []);
-
-  const requestTranslation = async (text, targetLangCode = 'en', { jobId } = {}) => {
+  const requestTranslation = async (text, targetLangCode) => {
     const sourceText = (text || '').trim();
     if (!sourceText) return { ok: false, reason: 'empty', text: '' };
     if (targetLangCode === 'none') return { ok: false, reason: 'disabled', text: sourceText };
-    if (!ollamaConfig.isConnected || !activeOllamaModel) return { ok: false, reason: 'not-ready', text: '' };
 
-    const controller = new AbortController();
-    const trackProgressAbort = Boolean(jobId) && isImportProgressJobActive(jobId);
-    let didTimeout = false;
+    const targetLang = LANGUAGES.find(l => l.code === targetLangCode);
+    const langNameHint = targetLang ? targetLang.name : targetLangCode;
 
-    if (trackProgressAbort) {
-      progressAbortControllerRef.current = controller;
-    }
-
-    const timeoutId = setTimeout(() => {
-      didTimeout = true;
-      controller.abort();
-    }, TRANSLATION_TIMEOUT_MS);
-
-    try {
-      // Find language name
-      const targetLang = LANGUAGES.find(l => l.code === targetLangCode);
-      const targetLangName = targetLang ? targetLang.name : 'English';
-
-      const prompt = `Translate the following mobile app feature title into ${targetLangName}. Keep it concise, marketing style. Only output the ${targetLangName} text, no explanations. Text: "${sourceText}"`;
-
-      const response = await fetch(`${ollamaConfig.host}/api/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: activeOllamaModel,
-          prompt: prompt,
-          stream: false
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Translation request failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const translatedText = (data.response || '').trim().replace(/^"|"$/g, '');
-
-      if (!translatedText) {
-        return { ok: false, reason: 'empty-response', text: '' };
-      }
-
-      return { ok: true, reason: null, text: translatedText };
-    } catch (e) {
-      const wasCancelled = e?.name === 'AbortError' && !didTimeout;
-      if (!wasCancelled) {
-        console.error("Translation error:", e);
-      }
-      return {
-        ok: false,
-        reason: e?.name === 'AbortError'
-          ? (didTimeout ? 'timeout' : 'cancelled')
-          : 'error',
-        text: ''
-      };
-    } finally {
-      clearTimeout(timeoutId);
-      if (trackProgressAbort && progressAbortControllerRef.current === controller) {
-        progressAbortControllerRef.current = null;
-      }
-    }
+    return AIProviderManager.translate(sourceText, targetLangCode, langNameHint);
   };
 
   // --- CANVAS LOGIC ---
@@ -2483,20 +2325,19 @@ const App = () => {
         }
       }
 
-      if (!ollamaConfig.autoTranslate) {
-        finishImportProgressState(jobId, {
-          phase: 'import',
-          status: 'success',
-          current: imagesToProcess.length,
-          total: imagesToProcess.length,
-          message: t('alerts.importComplete', '导入完成'),
-          detail: t('alerts.autoTranslateDisabledDetail', '自动翻译已关闭，您仍可稍后手动翻译'),
-          successCount: imagesToProcess.length,
-          failedCount: 0,
-          skippedCount: 0
-        }, 3000);
-        return;
-      }
+      // Auto-translate is now disabled — skip translation after import
+      finishImportProgressState(jobId, {
+        phase: 'import',
+        status: 'success',
+        current: imagesToProcess.length,
+        total: imagesToProcess.length,
+        message: t('alerts.importComplete', '导入完成'),
+        detail: t('alerts.autoTranslateDisabledDetail', '点击「更新全局翻译」可一键翻译所有场景'),
+        successCount: imagesToProcess.length,
+        failedCount: 0,
+        skippedCount: 0
+      }, 3000);
+      return;
 
       if (selectedSecondaryLangs.length === 0) {
         finishImportProgressState(jobId, {
@@ -2682,21 +2523,8 @@ const App = () => {
       return { ok: false, translated: 0, failed: 0, skipped: items.length };
     }
 
-    const connection = await checkOllamaConnection({ jobId });
-    if (!isImportProgressJobActive(jobId) || connection.reason === 'cancelled') {
-      return { ok: false, translated: 0, failed: 0, skipped: items.length, cancelled: true };
-    }
-
-    if (!connection.ok) {
-      setShowOllamaGuide(true);
-
-      const missingOllamaMessage = connection.reason === 'no-models'
-        ? t('alerts.ollamaNoModels', '已检测到 Ollama，但没有可用模型，已跳过翻译')
-        : t('alerts.ollamaUnavailable', '未检测到可用的 Ollama 服务，已跳过翻译');
-      const missingOllamaDetail = connection.reason === 'no-models'
-        ? t('alerts.ollamaNoModelsDetail', '请先执行 ollama run qwen2.5:7b 或其他模型')
-        : t('alerts.ollamaUnavailableDetail', '请安装并启动 Ollama，然后再试一次翻译');
-
+    // Check AI provider is configured
+    if (!aiConfig.provider || !aiConfig.modelName) {
       finishImportProgressState(jobId, {
         phase: 'translate',
         status: 'warning',
@@ -2706,8 +2534,8 @@ const App = () => {
           ? t('alerts.manualTranslateUnavailable', '手动翻译不可用')
           : isBatchMode
             ? t('alerts.batchTranslateUnavailable', '批量翻译不可用')
-          : missingOllamaMessage,
-        detail: missingOllamaDetail,
+            : t('alerts.ollamaUnavailable', '未配置 AI Provider，已跳过翻译'),
+        detail: '请在「设置 → AI 管理」中配置 Provider 和模型',
         successCount: 0,
         failedCount: 0,
         skippedCount: items.length
@@ -5414,93 +5242,56 @@ const App = () => {
             {/* LEFT SIDEBAR - Scrollable Container */}
             <div className="w-80 border-r border-[var(--app-border)] bg-[var(--app-bg-sidebar)] flex flex-col flex-shrink-0 z-20 shadow-xl sidebar-panel overflow-y-auto no-scrollbar">
 
-              {/* Ollama Settings */}
+              {/* AI Status Panel */}
               <div className="px-4 py-3 border-b border-[var(--app-border)] bg-[var(--app-bg-panel-header)]">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2 text-xs font-semibold text-[var(--app-text-secondary)] tracking-[0.02em]">
-                    <Cpu className="w-3 h-3" /> {t('ollama.title')}
+                    <Cpu className="w-3 h-3" /> AI 翻译
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[10px] ${ollamaConfig.isConnected ? 'text-green-500' : 'text-red-500'}`}>
-                      {ollamaConfig.isConnected ? t('ollama.connected') : t('ollama.disconnected')}
-                    </span>
-                    <div className={`w-2 h-2 rounded-full ${ollamaConfig.isConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`}></div>
-                  </div>
+                  {aiConfig.provider && (
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full ${aiConnected === true ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : aiConnected === false ? 'bg-red-500' : 'bg-yellow-400'}`} />
+                      <span className={`text-[10px] ${aiConnected === true ? 'text-green-500' : aiConnected === false ? 'text-red-400' : 'text-yellow-400'}`}>
+                        {aiConnected === true ? '已连通' : aiConnected === false ? '连接失败' : '未测试'}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                {!ollamaConfig.isConnected ? (
+                {aiConfig.provider && aiConfig.modelName ? (
                   <div className="space-y-2">
-                    <input className="w-full text-xs bg-[var(--app-input-bg)] border border-[var(--app-border)] rounded p-1 text-[var(--app-text-primary)]"
-                      value={ollamaConfig.host} onChange={(e) => setOllamaConfig(s => ({ ...s, host: e.target.value }))}
-                      placeholder="http://localhost:11434"
-                    />
-                    <button onClick={async () => {
-                      const connection = await checkOllamaConnection();
-                      if (!connection.ok) {
-                        setShowOllamaGuide(true);
-                      } else {
-                        setShowOllamaGuide(false);
-                      }
-                    }}
-                      className="w-full text-xs bg-[var(--app-accent-light)] hover:bg-[var(--app-accent)] hover:text-white text-[var(--app-accent)] py-1.5 rounded border border-[var(--app-accent)]/30 transition flex items-center justify-center gap-1">
-                      {t('ollama.connect')}
+                    <div className="text-[11px] text-[var(--app-text-secondary)] leading-snug">
+                      <span className="opacity-60">Provider  </span>
+                      <span className="font-medium text-[var(--app-text-primary)]">{aiConfig.provider.name}</span>
+                    </div>
+                    <div className="text-[11px] text-[var(--app-text-secondary)] leading-snug">
+                      <span className="opacity-60">Model  </span>
+                      <span className="font-medium text-[var(--app-text-primary)]">{aiConfig.modelName}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleBatchRetranslate}
+                      disabled={isBatchRetranslating || batchTranslationTargetCount === 0 || selectedSecondaryLangs.length === 0}
+                      className={`w-full text-xs py-1.5 rounded border transition flex items-center justify-center gap-1.5 ${
+                        !isBatchRetranslating && batchTranslationTargetCount > 0 && selectedSecondaryLangs.length > 0
+                          ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-white hover:bg-[var(--app-accent-hover)]'
+                          : 'bg-[var(--app-bg-elevated)] border-[var(--app-border)] text-[var(--app-text-muted)] cursor-not-allowed'
+                      }`}
+                      title={selectedSecondaryLangs.length === 0 ? '未设置翻译语言' : batchTranslationTargetCount === 0 ? '没有可翻译的场景' : `翻译 ${batchTranslationTargetCount} 个场景`}
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isBatchRetranslating ? 'animate-spin' : ''}`} />
+                      更新全局翻译
                     </button>
-
-                    {/* Installation Guide - Shows when connection fails or user requests help */}
-                    {showOllamaGuide && (
-                      <div className="mt-2 p-3 bg-[var(--app-card-bg)] rounded-lg border border-[var(--app-border)] text-xs text-[var(--app-text-secondary)] animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div className="flex items-start gap-2 mb-2 text-[var(--app-warning)]">
-                          <Monitor className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                          <p className="leading-relaxed">
-                            <span className="font-semibold text-[var(--app-warning)]">{t('ollama.recommended')}</span>
-                            {t('ollama.recommendedDesc')}
-                          </p>
-                        </div>
-
-                        <div className="space-y-2 pl-1">
-                          <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded-full bg-[var(--app-bg-elevated)] flex items-center justify-center text-[10px] font-bold text-[var(--app-text-secondary)]">1</div>
-                            <a href="https://ollama.com/download" target="_blank" rel="noreferrer"
-                              className="text-[var(--app-accent)] hover:text-[var(--app-accent-hover)] underline underline-offset-2">
-                              {t('ollama.downloadInstall')}
-                            </a>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded-full bg-[var(--app-bg-elevated)] flex items-center justify-center text-[10px] font-bold text-[var(--app-text-secondary)]">2</div>
-                            <span className="text-[var(--app-text-secondary)]">{t('ollama.runApp')}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 rounded-full bg-[var(--app-bg-elevated)] flex items-center justify-center text-[10px] font-bold text-[var(--app-text-secondary)]">3</div>
-                            <span className="text-[var(--app-text-secondary)]">{t('ollama.clickConnect')}</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <select className="w-full text-xs bg-[var(--app-input-bg)] border border-[var(--app-border)] rounded p-1 text-[var(--app-text-primary)]" value={ollamaConfig.model}
-                      onChange={(e) => setOllamaConfig(s => ({ ...s, model: e.target.value }))}
+                  <div className="text-[11px] text-[var(--app-text-muted)] leading-relaxed">
+                    未配置 AI —
+                    <button
+                      className="ml-1 text-[var(--app-accent)] hover:underline"
+                      onClick={() => { setSettingsInitialTab('ai'); setShowSettingsModal(true); }}
                     >
-                      {ollamaConfig.availableModels.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <input type="checkbox" id="autoTrans" checked={ollamaConfig.autoTranslate} onChange={(e) => setOllamaConfig(s => ({ ...s, autoTranslate: e.target.checked }))}
-                        />
-                        <label htmlFor="autoTrans" className="text-xs text-[var(--app-text-secondary)]">{t('ollama.autoTranslateFilename')}</label>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleBatchRetranslate}
-                        disabled={isBatchRetranslating || batchTranslationTargetCount === 0 || selectedSecondaryLangs.length === 0}
-                        className={`shrink-0 text-[10px] flex items-center gap-1 px-2 py-1 rounded transition ${!isBatchRetranslating && batchTranslationTargetCount > 0 && selectedSecondaryLangs.length > 0 ? 'bg-[var(--app-accent)] text-white hover:bg-[var(--app-accent-hover)]' : 'bg-[var(--app-bg-elevated)] text-[var(--app-text-muted)] cursor-not-allowed'}`}
-                        title={batchTranslationJobCount > 0 ? t('alerts.batchTranslateSummary', { sceneCount: batchTranslationTargetCount, taskCount: batchTranslationJobCount }) : (selectedSecondaryLangs.length === 0 ? t('alerts.batchTranslateMissingTarget', '未设置翻译语言，无法执行批量翻译') : t('alerts.batchTranslateNoScenes', '没有可批量翻译的截图'))}
-                      >
-                        <RefreshCw className={`w-3 h-3 ${isBatchRetranslating ? 'animate-spin' : ''}`} />
-                        {t('ollama.batchTranslateAll', '批量翻译')}
-                      </button>
-                    </div>
+                      前往设置
+                    </button>
                   </div>
                 )}
               </div>
