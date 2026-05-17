@@ -930,12 +930,6 @@ const App = () => {
     return unsub;
   }, []);
 
-  // Automatically test connectivity in the background when provider/model changes or on app load if untested
-  useEffect(() => {
-    if (aiConfig.provider && aiConfig.modelName && aiConfig.lastConnectionStatus === null) {
-      AIProviderManager.testActiveConnection();
-    }
-  }, [aiConfig.provider?.id, aiConfig.modelName]);
 
   // Custom Size Presets (user-defined, project-level)
   const [customSizePresets, setCustomSizePresets] = useState([]);
@@ -992,6 +986,14 @@ const App = () => {
 
   // AI Provider config (read from AIProviderManager service)
   const [aiConfig, setAiConfig] = useState(() => AIProviderManager.getState());
+
+  // Automatically test connectivity in the background when provider/model changes or on app load if untested
+  useEffect(() => {
+    if (aiConfig.provider && aiConfig.modelName && aiConfig.lastConnectionStatus === null) {
+      AIProviderManager.testActiveConnection();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiConfig.provider?.id, aiConfig.modelName]);
   const [isRetranslating, setIsRetranslating] = useState(false);
   const [isBatchRetranslating, setIsBatchRetranslating] = useState(false);
   const selectedSecondaryLangs = normalizeSecondaryLangs(
