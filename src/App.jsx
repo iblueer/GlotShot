@@ -925,11 +925,17 @@ const App = () => {
   // Subscribe to AIProviderManager changes
   useEffect(() => {
     const unsub = AIProviderManager.onChange(() => {
-      setAiConfig(AIProviderManager.getActiveConfig());
-      setAiConnected(null); // reset connection state when config changes
+      setAiConfig(AIProviderManager.getState());
     });
     return unsub;
   }, []);
+
+  // Automatically test connectivity in the background when provider/model changes or on app load if untested
+  useEffect(() => {
+    if (aiConfig.provider && aiConfig.modelName && aiConfig.lastConnectionStatus === null) {
+      AIProviderManager.testActiveConnection();
+    }
+  }, [aiConfig.provider?.id, aiConfig.modelName]);
 
   // Custom Size Presets (user-defined, project-level)
   const [customSizePresets, setCustomSizePresets] = useState([]);
@@ -985,8 +991,7 @@ const App = () => {
 
 
   // AI Provider config (read from AIProviderManager service)
-  const [aiConfig, setAiConfig] = useState(() => AIProviderManager.getActiveConfig());
-  const [aiConnected, setAiConnected] = useState(null); // null=未测试, true, false
+  const [aiConfig, setAiConfig] = useState(() => AIProviderManager.getState());
   const [isRetranslating, setIsRetranslating] = useState(false);
   const [isBatchRetranslating, setIsBatchRetranslating] = useState(false);
   const selectedSecondaryLangs = normalizeSecondaryLangs(
@@ -5250,9 +5255,9 @@ const App = () => {
                   </div>
                   {aiConfig.provider && (
                     <div className="flex items-center gap-1.5">
-                      <div className={`w-2 h-2 rounded-full ${aiConnected === true ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : aiConnected === false ? 'bg-red-500' : 'bg-yellow-400'}`} />
-                      <span className={`text-[10px] ${aiConnected === true ? 'text-green-500' : aiConnected === false ? 'text-red-400' : 'text-yellow-400'}`}>
-                        {aiConnected === true ? '已连通' : aiConnected === false ? '连接失败' : '未测试'}
+                      <div className={`w-2 h-2 rounded-full ${aiConfig.lastConnectionStatus === true ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : aiConfig.lastConnectionStatus === false ? 'bg-red-500' : 'bg-yellow-400'}`} />
+                      <span className={`text-[10px] ${aiConfig.lastConnectionStatus === true ? 'text-green-500' : aiConfig.lastConnectionStatus === false ? 'text-red-400' : 'text-yellow-400'}`}>
+                        {aiConfig.lastConnectionStatus === true ? '已连通' : aiConfig.lastConnectionStatus === false ? '连接失败' : '未测试'}
                       </span>
                     </div>
                   )}

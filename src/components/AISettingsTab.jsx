@@ -183,17 +183,16 @@ function ProviderForm({ initial, onSave, onCancel }) {
 }
 
 export default function AISettingsTab() {
-  const [config, setConfig] = useState(() => AIProviderManager.getConfig());
+  const [config, setConfig] = useState(() => AIProviderManager.getState());
   const [editingId, setEditingId] = useState(null); // provider id being edited, or 'new'
   const [expandedId, setExpandedId] = useState(null);
   const [testingActive, setTestingActive] = useState(false);
-  const [activeTestResult, setActiveTestResult] = useState(null);
 
-  const refresh = useCallback(() => setConfig(AIProviderManager.getConfig()), []);
+  const refresh = useCallback(() => setConfig(AIProviderManager.getState()), []);
 
   useEffect(() => AIProviderManager.onChange(refresh), [refresh]);
 
-  const { providers, activeProviderId, activeModelName } = config;
+  const { providers, activeProviderId, activeModelName, lastConnectionStatus } = config;
   const activeProvider = providers.find(p => p.id === activeProviderId) ?? null;
 
   const handleSaveNew = (fields) => {
@@ -218,9 +217,7 @@ export default function AISettingsTab() {
   const handleTestActive = async () => {
     if (!activeProvider) return;
     setTestingActive(true);
-    setActiveTestResult(null);
-    const result = await AIProviderManager.testConnection(activeProvider);
-    setActiveTestResult(result);
+    await AIProviderManager.testActiveConnection();
     setTestingActive(false);
   };
 
@@ -246,10 +243,10 @@ export default function AISettingsTab() {
             <div className="ai-status-row">
               <span className="ai-status-label">状态</span>
               <div className="ai-status-conn">
-                {activeTestResult ? (
-                  <span className={`ai-conn-badge ${activeTestResult.ok ? 'ok' : 'fail'}`}>
+                {lastConnectionStatus !== null ? (
+                  <span className={`ai-conn-badge ${lastConnectionStatus ? 'ok' : 'fail'}`}>
                     <span className="ai-conn-dot" />
-                    {activeTestResult.ok ? '已连通' : '连接失败'}
+                    {lastConnectionStatus ? '已连通' : '连接失败'}
                   </span>
                 ) : (
                   <span className="ai-conn-badge unknown">

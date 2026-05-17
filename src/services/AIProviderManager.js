@@ -51,6 +51,7 @@ function defaultConfig() {
     providers: [],
     activeProviderId: null,
     activeModelName: null,
+    lastConnectionStatus: null, // null | boolean
   };
 }
 
@@ -93,10 +94,12 @@ export const AIProviderManager = {
 
   /** Readable state object for UI */
   getState() {
+    const config = loadConfig();
     return {
-      providers: loadConfig().providers,
-      activeProviderId: loadConfig().activeProviderId,
-      activeModelName: loadConfig().activeModelName,
+      providers: config.providers,
+      activeProviderId: config.activeProviderId,
+      activeModelName: config.activeModelName,
+      lastConnectionStatus: config.lastConnectionStatus ?? null,
     };
   },
 
@@ -143,6 +146,7 @@ export const AIProviderManager = {
     if (config.activeProviderId === id) {
       config.activeProviderId = null;
       config.activeModelName = null;
+      config.lastConnectionStatus = null;
     }
     saveConfig(config);
     notify();
@@ -153,6 +157,7 @@ export const AIProviderManager = {
     const config = loadConfig();
     config.activeProviderId = providerId;
     config.activeModelName = modelName;
+    config.lastConnectionStatus = null; // Reset connection status when target changes
     saveConfig(config);
     notify();
   },
@@ -161,6 +166,26 @@ export const AIProviderManager = {
   onChange(fn) {
     listeners.add(fn);
     return () => listeners.delete(fn);
+  },
+
+  /** Set connection status manually and persist */
+  setConnectionStatus(status) {
+    const config = loadConfig();
+    config.lastConnectionStatus = status;
+    saveConfig(config);
+    notify();
+  },
+
+  /** Helper to test the currently active provider's connection status */
+  async testActiveConnection() {
+    const { provider } = this.getActiveConfig();
+    if (!provider) {
+      this.setConnectionStatus(null);
+      return { ok: false, reason: 'not-configured', models: [] };
+    }
+    const result = await this.testConnection(provider);
+    this.setConnectionStatus(result.ok);
+    return result;
   },
 
   // ── Connection test ──────────────────────────────────────────────────────
