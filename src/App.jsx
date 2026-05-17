@@ -2706,7 +2706,7 @@ const App = () => {
     }
 
     const translationTargets = scenes
-      .filter(scene => scene.screenshot && getSceneTitleByLanguage(scene, globalSettings.primaryLang).trim())
+      .filter(scene => getSceneTitleByLanguage(scene, globalSettings.primaryLang).trim())
       .flatMap(scene => {
         const sourceText = getSceneTitleByLanguage(scene, globalSettings.primaryLang).trim();
         return selectedSecondaryLangs.map(targetLangCode => ({
@@ -3666,7 +3666,7 @@ const App = () => {
   };
 
   const batchTranslationTargetCount = scenes.filter(
-    scene => scene.screenshot && getSceneTitleByLanguage(scene, globalSettings.primaryLang).trim()
+    scene => getSceneTitleByLanguage(scene, globalSettings.primaryLang).trim()
   ).length;
   const batchTranslationJobCount = batchTranslationTargetCount * selectedSecondaryLangs.length;
   const hasTranslationLanguages = selectedSecondaryLangs.length > 0;
@@ -5288,7 +5288,13 @@ const App = () => {
                           ? 'bg-[var(--app-accent)] border-[var(--app-accent)] text-white hover:bg-[var(--app-accent-hover)]'
                           : 'bg-[var(--app-bg-elevated)] border-[var(--app-border)] text-[var(--app-text-muted)] cursor-not-allowed'
                       }`}
-                      title={selectedSecondaryLangs.length === 0 ? '未设置翻译语言' : batchTranslationTargetCount === 0 ? '没有可翻译的场景' : `翻译 ${batchTranslationTargetCount} 个场景`}
+                      title={
+                        selectedSecondaryLangs.length === 0
+                          ? '未设置翻译目标语言（请先在顶部栏选择翻译语言）'
+                          : batchTranslationTargetCount === 0
+                          ? '没有可翻译的场景（请确保场景的主语言标题不为空）'
+                          : `翻译 ${batchTranslationTargetCount} 个场景到 ${selectedSecondaryLangs.length} 种语言`
+                      }
                     >
                       <RefreshCw className={`w-3 h-3 ${isBatchRetranslating ? 'animate-spin' : ''}`} />
                       更新全局翻译
