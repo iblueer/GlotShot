@@ -987,13 +987,17 @@ const App = () => {
   // AI Provider config (read from AIProviderManager service)
   const [aiConfig, setAiConfig] = useState(() => AIProviderManager.getState());
 
+  // Derive the resolved provider object and model name from raw state
+  const aiActiveProvider = (aiConfig.providers ?? []).find(p => p.id === aiConfig.activeProviderId) ?? null;
+  const aiActiveModelName = aiConfig.activeModelName ?? null;
+
   // Automatically test connectivity in the background when provider/model changes or on app load if untested
   useEffect(() => {
-    if (aiConfig.provider && aiConfig.modelName && aiConfig.lastConnectionStatus === null) {
+    if (aiActiveProvider && aiActiveModelName && aiConfig.lastConnectionStatus === null) {
       AIProviderManager.testActiveConnection();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiConfig.provider?.id, aiConfig.modelName]);
+  }, [aiActiveProvider?.id, aiActiveModelName]);
   const [isRetranslating, setIsRetranslating] = useState(false);
   const [isBatchRetranslating, setIsBatchRetranslating] = useState(false);
   const selectedSecondaryLangs = normalizeSecondaryLangs(
@@ -1367,7 +1371,7 @@ const App = () => {
 
   // --- AI INTEGRATION ---
 
-  const canTranslateWithAi = Boolean(aiConfig.provider) && Boolean(aiConfig.modelName) && selectedSecondaryLangs.length > 0;
+  const canTranslateWithAi = Boolean(aiActiveProvider) && Boolean(aiActiveModelName) && selectedSecondaryLangs.length > 0;
 
   const requestTranslation = async (text, targetLangCode) => {
     const sourceText = (text || '').trim();
@@ -2531,7 +2535,7 @@ const App = () => {
     }
 
     // Check AI provider is configured
-    if (!aiConfig.provider || !aiConfig.modelName) {
+    if (!aiActiveProvider || !aiActiveModelName) {
       finishImportProgressState(jobId, {
         phase: 'translate',
         status: 'warning',
@@ -5255,7 +5259,7 @@ const App = () => {
                   <div className="flex items-center gap-2 text-xs font-semibold text-[var(--app-text-secondary)] tracking-[0.02em]">
                     <Cpu className="w-3 h-3" /> AI 翻译
                   </div>
-                  {aiConfig.provider && (
+                  {aiActiveProvider && (
                     <div className="flex items-center gap-1.5">
                       <div className={`w-2 h-2 rounded-full ${aiConfig.lastConnectionStatus === true ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : aiConfig.lastConnectionStatus === false ? 'bg-red-500' : 'bg-yellow-400'}`} />
                       <span className={`text-[10px] ${aiConfig.lastConnectionStatus === true ? 'text-green-500' : aiConfig.lastConnectionStatus === false ? 'text-red-400' : 'text-yellow-400'}`}>
@@ -5265,15 +5269,15 @@ const App = () => {
                   )}
                 </div>
 
-                {aiConfig.provider && aiConfig.modelName ? (
+                {aiActiveProvider && aiActiveModelName ? (
                   <div className="space-y-2">
                     <div className="text-[11px] text-[var(--app-text-secondary)] leading-snug">
                       <span className="opacity-60">Provider  </span>
-                      <span className="font-medium text-[var(--app-text-primary)]">{aiConfig.provider.name}</span>
+                      <span className="font-medium text-[var(--app-text-primary)]">{aiActiveProvider.name}</span>
                     </div>
                     <div className="text-[11px] text-[var(--app-text-secondary)] leading-snug">
                       <span className="opacity-60">Model  </span>
-                      <span className="font-medium text-[var(--app-text-primary)]">{aiConfig.modelName}</span>
+                      <span className="font-medium text-[var(--app-text-primary)]">{aiActiveModelName}</span>
                     </div>
                     <button
                       type="button"
