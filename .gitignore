@@ -36,7 +36,6 @@ release
 
 # Ignored Directories
 public/设备外形/
-public/背景/
 .agent/
 
 # Signing files
